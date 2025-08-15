@@ -1,0 +1,410 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Rope Hero Web Game</title>
+    <style>
+        body {
+            margin: 0;
+            overflow: hidden;
+            background: linear-gradient(to bottom, #87CEEB, #1E90FF);
+            font-family: Arial, sans-serif;
+        }
+        canvas {
+            display: block;
+        }
+        #ui {
+            position: absolute;
+            top: 10px;
+            width: 100%;
+            text-align: center;
+            color: white;
+            text-shadow: 1px 1px 3px black;
+            pointer-events: none;
+        }
+        #controls {
+            position: absolute;
+            bottom: 20px;
+            width: 100%;
+            text-align: center;
+        }
+        .mobile-btn {
+            display: inline-block;
+            width: 80px;
+            height: 80px;
+            margin: 0 10px;
+            background-color: rgba(255, 255, 255, 0.3);
+            border-radius: 50%;
+            border: 2px solid white;
+            color: white;
+            font-size: 24px;
+            line-height: 80px;
+            text-align: center;
+            user-select: none;
+        }
+        #gameOver {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            background-color: rgba(0, 0, 0, 0.7);
+            color: white;
+            padding: 20px;
+            border-radius: 10px;
+            text-align: center;
+            display: none;
+        }
+        #restartBtn {
+            background-color: #4CAF50;
+            border: none;
+            color: white;
+            padding: 10px 20px;
+            text-align: center;
+            text-decoration: none;
+            display: inline-block;
+            font-size: 16px;
+            margin: 10px 2px;
+            cursor: pointer;
+            border-radius: 5px;
+        }
+    </style>
+</head>
+<body>
+    <div id="ui">
+        <h1>Rope Hero</h1>
+        <div>Score: <span id="score">0</span></div>
+        <div>Time: <span id="time">60</span>s</div>
+    </div>
+
+    <div id="controls">
+        <div class="mobile-btn" id="leftBtn">←</div>
+        <div class="mobile-btn" id="jumpBtn">↑</div>
+        <div class="mobile-btn" id="rightBtn">→</div>
+        <div class="mobile-btn" id="ropeBtn">Rope</div>
+    </div>
+
+    <div id="gameOver">
+        <h2>Game Over!</h2>
+        <p>Your final score: <span id="finalScore">0</span></p>
+        <button id="restartBtn">Play Again</button>
+    </div>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/cannon.js/0.6.2/cannon.min.js"></script>
+    <script>
+        // Game variables
+        let score = 0;
+        let timeLeft = 60;
+        let gameActive = true;
+        let isMobile = /Mobi|Android/i.test(navigator.userAgent);
+
+        // Three.js setup
+        const scene = new THREE.Scene();
+        const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+        const renderer = new THREE.WebGLRenderer({ antialias: true });
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        renderer.shadowMap.enabled = true;
+        document.body.appendChild(renderer.domElement);
+
+        // Physics world
+        const world = new CANNON.World();
+        world.gravity.set(0, -9.82, 0);
+        world.broadphase = new CANNON.NaiveBroadphase();
+        world.solver.iterations = 10;
+
+        // Lighting
+        const ambientLight = new THREE.AmbientLight(0x404040);
+        scene.add(ambientLight);
+        
+        const directionalLight = new THREE.DirectionalLight(0xffffff, 0.8);
+        directionalLight.position.set(10, 20, 10);
+        directionalLight.castShadow = true;
+        directionalLight.shadow.mapSize.width = 2048;
+        directionalLight.shadow.mapSize.height = 2048;
+        scene.add(directionalLight);
+
+        // Player
+        const playerGeometry = new THREE.SphereGeometry(0.5, 32, 32);
+        const playerMaterial = new THREE.MeshStandardMaterial({ 
+            color: 0xff4500,
+            roughness: 0.7,
+            metalness: 0.3
+        });
+        const player = new THREE.Mesh(playerGeometry, playerMaterial);
+        player.castShadow = true;
+        player.receiveShadow = true;
+        scene.add(player);
+        player.position.y = 5;
+
+        const playerShape = new CANNON.Sphere(0.5);
+        const playerBody = new CANNON.Body({ mass: 5 });
+        playerBody.addShape(playerShape);
+        playerBody.position.copy(player.position);
+        world.addBody(playerBody);
+
+        // Ground
+        const groundGeometry = new THREE.PlaneGeometry(50, 50);
+        const groundMaterial = new THREE.MeshStandardMaterial({ 
+            color: 0x3a5f0b,
+            roughness: 0.8,
+            metalness: 0.2
+        });
+        const ground = new THREE.Mesh(groundGeometry, groundMaterial);
+        ground.rotation.x = -Math.PI / 2;
+        ground.receiveShadow = true;
+        scene.add(ground);
+
+        const groundShape = new CANNON.Plane();
+        const groundBody = new CANNON.Body({ mass: 0 });
+        groundBody.addShape(groundShape);
+        groundBody.quaternion.setFromAxisAngle(new CANNON.Vec3(1, 0, 0), -Math.PI / 2);
+        world.addBody(groundBody);
+
+        // Buildings
+        const buildings = [];
+        const buildingBodies = [];
+        const buildingGeometry = new THREE.BoxGeometry(4, 8, 4);
+        const buildingMaterial = new THREE.MeshStandardMaterial({ 
+            color: 0x8b4513,
+            roughness: 0.6,
+            metalness: 0.1
+        });
+
+        for (let i = 0; i < 10; i++) {
+            const building = new THREE.Mesh(buildingGeometry, buildingMaterial);
+            building.castShadow = true;
+            building.receiveShadow = true;
+            
+            // Random position (avoid center where player starts)
+            let x, z;
+            do {
+                x = (Math.random() - 0.5) * 40;
+                z = (Math.random() - 0.5) * 40;
+            } while (Math.sqrt(x*x + z*z) < 10);
+            
+            building.position.set(x, 4, z);
+            scene.add(building);
+            buildings.push(building);
+
+            // Physics body for building
+            const buildingShape = new CANNON.Box(new CANNON.Vec3(2, 4, 2));
+            const buildingBody = new CANNON.Body({ mass: 0 });
+            buildingBody.addShape(buildingShape);
+            buildingBody.position.copy(building.position);
+            world.addBody(buildingBody);
+            buildingBodies.push(buildingBody);
+        }
+
+        // Rope
+        const ropeMaterial = new THREE.LineBasicMaterial({ color: 0x000000 });
+        const ropeGeometry = new THREE.BufferGeometry();
+        const rope = new THREE.Line(ropeGeometry, ropeMaterial);
+        scene.add(rope);
+
+        let isRopeAttached = false;
+        let ropeTarget = null;
+        let ropeTargetBody = null;
+
+        // Collectibles
+        const collectibles = [];
+        const collectibleGeometry = new THREE.SphereGeometry(0.3, 16, 16);
+        const collectibleMaterial = new THREE.MeshStandardMaterial({ 
+            color: 0xffd700,
+            emissive: 0xffd700,
+            emissiveIntensity: 0.5,
+            metalness: 0.9,
+            roughness: 0.1
+        });
+
+        for (let i = 0; i < 15; i++) {
+            const collectible = new THREE.Mesh(collectibleGeometry, collectibleMaterial);
+            collectible.castShadow = true;
+            
+            // Position above ground and buildings
+            collectible.position.set(
+                (Math.random() - 0.5) * 40,
+                Math.random() * 10 + 5,
+                (Math.random() - 0.5) * 40
+            );
+            
+            scene.add(collectible);
+            collectibles.push(collectible);
+
+            // Physics body for collectible
+            const collectibleShape = new CANNON.Sphere(0.3);
+            const collectibleBody = new CANNON.Body({ mass: 0, isTrigger: true });
+            collectibleBody.addShape(collectibleShape);
+            collectibleBody.position.copy(collectible.position);
+            collectibleBody.addEventListener('collide', (e) => {
+                if (e.body.id === playerBody.id) {
+                    // Collect the item
+                    scene.remove(collectible);
+                    world.removeBody(collectibleBody);
+                    collectibles.splice(collectibles.indexOf(collectible), 1);
+                    score += 10;
+                    document.getElementById('score').textContent = score;
+                }
+            });
+            world.addBody(collectibleBody);
+        }
+
+        // Camera position
+        camera.position.set(0, 5, 10);
+        camera.lookAt(player.position);
+
+        // Controls
+        const keys = {};
+        document.addEventListener('keydown', (e) => keys[e.code] = true);
+        document.addEventListener('keyup', (e) => keys[e.code] = false);
+
+        // Mobile controls
+        if (isMobile) {
+            document.getElementById('leftBtn').addEventListener('touchstart', () => keys['KeyA'] = true);
+            document.getElementById('leftBtn').addEventListener('touchend', () => keys['KeyA'] = false);
+            document.getElementById('rightBtn').addEventListener('touchstart', () => keys['KeyD'] = true);
+            document.getElementById('rightBtn').addEventListener('touchend', () => keys['KeyD'] = false);
+            document.getElementById('jumpBtn').addEventListener('touchstart', () => keys['Space'] = true);
+            document.getElementById('jumpBtn').addEventListener('touchend', () => keys['Space'] = false);
+            document.getElementById('ropeBtn').addEventListener('touchstart', attachRope);
+            document.getElementById('ropeBtn').addEventListener('touchend', releaseRope);
+        } else {
+            document.addEventListener('mousedown', attachRope);
+            document.addEventListener('mouseup', releaseRope);
+        }
+
+        function attachRope() {
+            if (isRopeAttached) return;
+
+            // Find nearest building in front of player
+            const raycaster = new THREE.Raycaster(
+                player.position,
+                new THREE.Vector3(
+                    Math.sin(player.rotation.y),
+                    0,
+                    Math.cos(player.rotation.y)
+                )
+            );
+            
+            const intersects = raycaster.intersectObjects(buildings);
+            if (intersects.length > 0 && intersects[0].distance < 15) {
+                isRopeAttached = true;
+                ropeTarget = intersects[0].point;
+                
+                // Find corresponding physics body
+                for (let i = 0; i < buildings.length; i++) {
+                    if (buildings[i].position.distanceTo(ropeTarget) < 5) {
+                        ropeTargetBody = buildingBodies[i];
+                        break;
+                    }
+                }
+            }
+        }
+
+        function releaseRope() {
+            isRopeAttached = false;
+            ropeTarget = null;
+            ropeTargetBody = null;
+            ropeGeometry.setAttribute('position', new THREE.BufferAttribute(new Float32Array(6), 3));
+        }
+
+        // Game timer
+        const timer = setInterval(() => {
+            if (timeLeft > 0) {
+                timeLeft--;
+                document.getElementById('time').textContent = timeLeft;
+            } else {
+                endGame();
+            }
+        }, 1000);
+
+        function endGame() {
+            gameActive = false;
+            clearInterval(timer);
+            document.getElementById('finalScore').textContent = score;
+            document.getElementById('gameOver').style.display = 'block';
+        }
+
+        document.getElementById('restartBtn').addEventListener('click', () => {
+            location.reload();
+        });
+
+        // Animation loop
+        const clock = new THREE.Clock();
+        let delta;
+
+        function animate() {
+            if (!gameActive) return;
+
+            requestAnimationFrame(animate);
+            delta = clock.getDelta();
+
+            // Update physics
+            world.step(1/60, delta, 3);
+
+            // Update player position from physics
+            player.position.copy(playerBody.position);
+            player.quaternion.copy(playerBody.quaternion);
+
+            // Player movement
+            const moveForce = 10;
+            if (keys['KeyW'] || keys['ArrowUp']) {
+                playerBody.velocity.z = -moveForce;
+            }
+            if (keys['KeyS'] || keys['ArrowDown']) {
+                playerBody.velocity.z = moveForce;
+            }
+            if (keys['KeyA'] || keys['ArrowLeft']) {
+                playerBody.velocity.x = -moveForce;
+            }
+            if (keys['KeyD'] || keys['ArrowRight']) {
+                playerBody.velocity.x = moveForce;
+            }
+            if ((keys['Space'] || keys['KeyW'] || keys['ArrowUp']) && playerBody.velocity.y < 0.1 && playerBody.position.y < 1.5) {
+                playerBody.velocity.y = 8;
+            }
+
+            // Rope physics
+            if (isRopeAttached && ropeTargetBody) {
+                const ropeDirection = new CANNON.Vec3();
+                ropeTargetBody.position.vsub(playerBody.position, ropeDirection);
+                const distance = ropeDirection.length();
+                ropeDirection.normalize();
+                
+                if (distance > 5) {
+                    const pullForce = 20;
+                    playerBody.velocity.x += ropeDirection.x * pullForce * delta;
+                    playerBody.velocity.z += ropeDirection.z * pullForce * delta;
+                }
+
+                // Update rope visualization
+                const positions = new Float32Array(6);
+                positions[0] = player.position.x;
+                positions[1] = player.position.y;
+                positions[2] = player.position.z;
+                positions[3] = ropeTarget.x;
+                positions[4] = ropeTarget.y;
+                positions[5] = ropeTarget.z;
+                ropeGeometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+            }
+
+            // Camera follow
+            camera.position.x = player.position.x;
+            camera.position.z = player.position.z + 10;
+            camera.position.y = player.position.y + 5;
+            camera.lookAt(player.position);
+
+            renderer.render(scene, camera);
+        }
+
+        // Handle window resize
+        window.addEventListener('resize', () => {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        });
+
+        animate();
+    </script>
+</body>
+</html>
