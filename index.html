@@ -1,0 +1,50 @@
+
+<!DOCTYPE html>
+<html>
+<head>
+    <title>3 Lane Car Game</title>
+    <style>
+        body { margin: 0; overflow: hidden; background: #333; color: white; text-align: center; }
+        canvas { background: #222; display: block; margin: auto; }
+    </style>
+</head>
+<body>
+<h1>3 Lane Car Game</h1>
+<canvas id="gameCanvas" width="400" height="600"></canvas>
+<script>
+    const canvas = document.getElementById("gameCanvas");
+    const ctx = canvas.getContext("2d");
+    let carY = 500, lane = 1;
+
+    function drawCar() {
+        ctx.fillStyle = "red";
+        ctx.fillRect(100 * lane + 20, carY, 60, 100);
+    }
+
+    function drawLanes() {
+        ctx.strokeStyle = "white";
+        ctx.lineWidth = 2;
+        for (let i = 1; i < 3; i++) {
+            ctx.beginPath();
+            ctx.moveTo(100 * i, 0);
+            ctx.lineTo(100 * i, canvas.height);
+            ctx.stroke();
+        }
+    }
+
+    function gameLoop() {
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        drawLanes();
+        drawCar();
+        requestAnimationFrame(gameLoop);
+    }
+
+    document.addEventListener("keydown", e => {
+        if (e.key === "ArrowLeft" && lane > 0) lane--;
+        if (e.key === "ArrowRight" && lane < 2) lane++;
+    });
+
+    gameLoop();
+</script>
+<script src="./script.js"></script></body>
+</html>
